@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>RehoSprint — Play</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/participant.css">
+</head>
+<body class="participant-body">
+
+  <div class="track" aria-hidden="true"><div class="lane"></div><div class="lane"></div><div class="lane"></div></div>
+
+  <header class="p-header">
+    <div class="brand-mark small">R<span class="dot">.</span>SPRINT</div>
+    <div class="p-timer" id="p-timer">--</div>
+  </header>
+
+  <main class="p-stage">
+
+    <!-- WAITING STATE -->
+    <section id="p-waiting" class="p-panel active">
+      <p class="p-event-name" id="p-event-name">—</p>
+      <div class="pulse-dot"></div>
+      <p class="p-status-text">Waiting for the host to start...</p>
+      <p class="p-hint" id="p-participant-name"></p>
+    </section>
+
+    <!-- LIVE QUESTION STATE -->
+    <section id="p-live" class="p-panel">
+      <p class="p-progress" id="p-progress">Question 1</p>
+      <img id="p-question-image" class="p-question-image hidden" src="" alt="">
+      <h1 class="p-question-text" id="p-question-text">—</h1>
+      <div class="p-options" id="p-options"></div>
+      <p class="p-locked-msg hidden" id="p-locked-msg">Answer locked in — waiting for reveal...</p>
+    </section>
+
+    <!-- REVEAL STATE -->
+    <section id="p-reveal" class="p-panel">
+      <div class="p-result-icon" id="p-result-icon">—</div>
+      <p class="p-result-text" id="p-result-text">—</p>
+      <p class="p-result-points" id="p-result-points"></p>
+      <p class="p-hint">Next question coming up...</p>
+    </section>
+
+    <!-- SESSION ENDED STATE -->
+    <section id="p-ended" class="p-panel">
+      <h1 class="p-final-title">Session Complete</h1>
+      <div class="p-rank-badge" id="p-rank-badge">#—</div>
+      <p class="p-final-score" id="p-final-score">0 pts</p>
+      <div class="p-leaderboard" id="p-leaderboard"></div>
+    </section>
+
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="js/firebase-config.js"></script>
+  <script src="js/shared.js"></script>
+  <script src="js/participant.js"></script>
+</body>
+</html>
