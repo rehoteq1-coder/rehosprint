@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>RehoSprint — Answer Fast. Rise Fast.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Signature element: animated sprint track / lane lines racing across the top -->
+  <div class="track" aria-hidden="true">
+    <div class="lane"></div>
+    <div class="lane"></div>
+    <div class="lane"></div>
+  </div>
+
+  <main class="stage">
+    <header class="brand">
+      <div class="brand-mark">R<span class="dot">.</span>SPRINT</div>
+      <p class="tagline">Answer Fast. Rise Fast.</p>
+    </header>
+
+    <section class="panel" id="entry-panel">
+
+      <div class="tabs">
+        <button class="tab active" data-tab="join">Join Event</button>
+        <button class="tab" data-tab="login">Log In</button>
+        <button class="tab" data-tab="register">Register</button>
+      </div>
+
+      <!-- JOIN: enter event PIN, then routed to login/register -->
+      <form class="form-view active" id="form-join">
+        <label for="event-pin">Event PIN</label>
+        <input type="text" id="event-pin" placeholder="e.g. SPR-4821" autocomplete="off" required maxlength="12">
+        <p class="hint">Get this code from your event host.</p>
+        <button type="submit" class="btn-primary">Continue</button>
+      </form>
+
+      <!-- LOGIN -->
+      <form class="form-view" id="form-login">
+        <label for="login-email">Email or Phone</label>
+        <input type="text" id="login-email" required autocomplete="username">
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" required autocomplete="current-password">
+        <button type="submit" class="btn-primary">Log In</button>
+        <p class="error" id="login-error"></p>
+      </form>
+
+      <!-- REGISTER -->
+      <form class="form-view" id="form-register">
+        <label for="reg-name">Full Name</label>
+        <input type="text" id="reg-name" required autocomplete="name">
+        <label for="reg-email">Email or Phone</label>
+        <input type="text" id="reg-email" required autocomplete="username">
+        <label for="reg-password">Create Password</label>
+        <input type="password" id="reg-password" required minlength="6" autocomplete="new-password">
+        <button type="submit" class="btn-primary">Create Account</button>
+        <p class="error" id="register-error"></p>
+      </form>
+
+    </section>
+
+    <p class="footnote">A Rehoteq Technologies product</p>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="shared.js"></script>
+  <script src="entry.js"></script>
+</body>
+</html>
