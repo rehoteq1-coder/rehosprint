@@ -1,0 +1,187 @@
+/* ============================================================
+   RehoSprint — Central Display Styles (TV / projector optimized)
+   ============================================================ */
+
+.display-body { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px; }
+
+.d-panel { display: none; width: 100%; max-width: 1100px; flex-direction: column; align-items: center; gap: 20px; text-align: center; }
+.d-panel.active { display: flex; }
+
+/* ---------- WAITING ---------- */
+.d-brand-mark {
+  font-family: 'Archivo Black', sans-serif;
+  font-size: clamp(48px, 8vw, 84px);
+  background: var(--gradient);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.d-event-name { font-size: 22px; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; }
+.d-join-label { font-size: 18px; color: var(--text); margin-top: 20px; }
+.d-pin {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 700;
+  letter-spacing: 8px;
+  color: var(--orange);
+  background: var(--surface);
+  border: 3px solid var(--orange);
+  border-radius: 20px;
+  padding: 20px 50px;
+}
+.d-joined-count { font-size: 16px; color: var(--muted); margin-top: 10px; }
+.d-joined-count span { color: var(--text); font-weight: 700; font-family: 'JetBrains Mono', monospace; font-size: 20px; }
+
+/* ---------- LIVE ---------- */
+.d-live-top { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+.d-progress {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--muted);
+  font-size: 18px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.d-timer {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--orange);
+}
+.d-timer.urgent { color: var(--red); animation: pulseTimer 0.6s ease-in-out infinite; }
+@keyframes pulseTimer { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.d-question-image { width: 100%; max-height: 320px; object-fit: cover; border-radius: 16px; }
+.d-question-text { font-size: clamp(30px, 4.5vw, 48px); font-weight: 700; line-height: 1.25; }
+
+.d-options { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; width: 100%; }
+.d-options div {
+  background: var(--surface);
+  border: 3px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  font-size: 22px;
+  font-weight: 600;
+  text-align: left;
+}
+.d-options div.correct { border-color: #3DFFB0; color: #3DFFB0; background: rgba(61,255,176,0.08); }
+
+.d-answered-bar { width: 100%; height: 10px; background: var(--surface); border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+.d-answered-fill { height: 100%; background: var(--gradient); width: 0%; transition: width 0.3s ease; }
+.d-answered-label { font-family: 'JetBrains Mono', monospace; color: var(--muted); font-size: 16px; }
+
+/* ---------- FASTEST CORRECT ANSWERS (reveal) ---------- */
+.d-fastest-wrap { width: 100%; max-width: 600px; margin-top: 10px; }
+.d-fastest-title {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--muted);
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+.d-fastest-list { display: flex; flex-direction: column-reverse; gap: 10px; }
+.d-fastest-row {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--surface); border: 2px solid var(--line); border-radius: 12px;
+  padding: 12px 20px;
+  opacity: 0;
+  transform: translateY(12px);
+  animation: fastestRowIn 0.4s ease forwards;
+}
+.d-fastest-row.winner {
+  border-color: #FFD35C;
+  background: rgba(255,211,92,0.08);
+  box-shadow: 0 0 24px rgba(255,211,92,0.25);
+}
+@keyframes fastestRowIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+.d-fastest-rank { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: var(--muted); width: 36px; }
+.d-fastest-row.winner .d-fastest-rank { color: #FFD35C; }
+.d-fastest-name { flex: 1; font-size: 18px; font-weight: 700; text-align: left; }
+.d-fastest-time { font-family: 'JetBrains Mono', monospace; font-size: 15px; color: var(--muted); }
+.d-fastest-points { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; color: var(--orange); }
+
+/* ---------- DRAW: SHUFFLING MARQUEE ---------- */
+.draw-marquee-wrap {
+  width: 100%;
+  max-width: 900px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 2px solid var(--orange);
+  border-radius: 16px;
+  padding: 20px 0;
+  mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+}
+.draw-marquee {
+  display: flex;
+  gap: 40px;
+  white-space: nowrap;
+  animation: marqueeScroll 8s linear infinite;
+}
+.draw-marquee span {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  opacity: 0.85;
+}
+@keyframes marqueeScroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* ---------- DRAW: GROUPS REVEAL BOARD ---------- */
+.draw-groups-board {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-top: 20px;
+  max-height: 78vh;
+  overflow-y: auto;
+}
+.draw-group-card {
+  background: var(--surface);
+  border: 2px solid var(--orange);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: left;
+  opacity: 0;
+  transform: translateY(14px) scale(0.96);
+  animation: groupCardIn 0.5s ease forwards;
+}
+@keyframes groupCardIn {
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.draw-group-card .g-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--orange);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.draw-group-card .g-school {
+  font-size: 13px;
+  color: var(--text);
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+.draw-group-card .g-school:last-child { border-bottom: none; }
+
+/* ---------- CHAMPIONS LADDER ---------- */
+.d-ladder-title { font-family: 'Archivo Black', sans-serif; font-size: clamp(30px, 5vw, 44px); }
+.d-ladder { width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 12px; }
+.d-ladder-row {
+  display: flex; align-items: center; gap: 18px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px 22px;
+}
+.d-ladder-rank { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; color: var(--muted); width: 50px; text-align: left; }
+.d-ladder-row:nth-child(1) { border-color: #FFD35C; }
+.d-ladder-row:nth-child(1) .d-ladder-rank { color: #FFD35C; }
+.d-ladder-row:nth-child(2) .d-ladder-rank { color: #C9CBD6; }
+.d-ladder-row:nth-child(3) .d-ladder-rank { color: #D0925A; }
+.d-ladder-name { flex: 1; font-size: 20px; font-weight: 700; text-align: left; }
+.d-ladder-score { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; color: var(--orange); }
