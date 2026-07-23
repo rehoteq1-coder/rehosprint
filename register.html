@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RehoSprint — School Registration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="register.css">
+</head>
+<body>
+
+  <div class="track" aria-hidden="true"><div class="lane"></div><div class="lane"></div><div class="lane"></div></div>
+
+  <main class="stage">
+    <header class="brand">
+      <div class="brand-mark">R<span class="dot">.</span>SPRINT</div>
+      <p class="tagline">School Registration</p>
+    </header>
+
+    <section class="panel" id="reg-panel">
+
+      <div id="event-info" class="reg-event-info">
+        <p class="muted">Loading event details...</p>
+      </div>
+
+      <form id="form-register-school" class="form-view active">
+        <label for="school-name">School Name</label>
+        <input type="text" id="school-name" required placeholder="e.g. Government College, Okitipupa">
+
+        <label for="contact-person">Contact Person (Principal/Coordinator)</label>
+        <input type="text" id="contact-person" required placeholder="Full name">
+
+        <label for="contact-phone">Phone / WhatsApp Number</label>
+        <input type="tel" id="contact-phone" required placeholder="e.g. 0703xxxxxxx">
+
+        <label for="payment-ref">Payment Reference (\u20a65,000 registration fee)</label>
+        <input type="text" id="payment-ref" required placeholder="Transaction ID / reference from your payment">
+        <p class="hint" id="payment-instructions">Loading payment details...</p>
+
+        <button type="submit" class="btn-primary">Submit Registration</button>
+        <p class="error" id="reg-error"></p>
+      </form>
+
+      <div id="reg-success" class="reg-success hidden">
+        <div class="pulse-dot"></div>
+        <h2>Registration Received!</h2>
+        <p>Your school's registration is now <strong>pending activation</strong>. Once your payment is confirmed, your school will be added to the official school list for the draw.</p>
+        <p class="hint">Keep your payment reference safe in case the organizers need to verify it.</p>
+      </div>
+
+    </section>
+
+    <p class="footnote">A Rehoteq Technologies product</p>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="shared.js"></script>
+  <script src="register.js"></script>
+</body>
+</html>

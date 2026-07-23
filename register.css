@@ -1,0 +1,16 @@
+.reg-event-info {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.reg-event-info .ev-name { font-weight: 700; font-size: 15px; color: var(--text); }
+.reg-event-info .ev-meta { font-size: 12px; color: var(--muted); margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+
+.reg-success { display: none; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 20px 0; }
+.reg-success.active,
+.reg-success:not(.hidden) { display: flex; }
+.reg-success h2 { font-family: 'Archivo Black', sans-serif; font-size: 20px; background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.reg-success p { color: var(--text); font-size: 14px; line-height: 1.5; }
+.reg-success .hint { color: var(--muted); font-size: 12px; }
