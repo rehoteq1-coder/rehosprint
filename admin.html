@@ -25,7 +25,18 @@
       <input type="password" id="admin-password" name="password" required autocomplete="current-password">
       <button type="submit" class="btn-primary" id="btn-admin-login">Log In</button>
       <p class="error" id="admin-login-error"></p>
-    </form>
+      <div id="admin-rules-help" class="rules-help hidden">
+        <p>Your email/password worked. Firebase then blocked the database, which is why you saw <strong>Permission denied</strong>.</p>
+        <p>Do this once, then log in again:</p>
+        <ol>
+          <li>Open <a href="https://console.firebase.google.com/project/rehosprint/database/rehosprint-default-rtdb/rules" target="_blank" rel="noopener">Firebase Rules</a> (Realtime Database → Rules)</li>
+          <li>Click <strong>Copy rules</strong> below and paste over everything in that page</li>
+          <li>Click <strong>Publish</strong></li>
+          <li>Come back here and press Log In again</li>
+        </ol>
+        <button type="button" class="btn-secondary" id="btn-copy-rules">Copy rules</button>
+        <pre id="firebase-rules-snippet" class="rules-snippet"></pre>
+      </div>
   </section>
 
   <!-- ============ ADMIN DASHBOARD (hidden until authenticated) ============ -->

@@ -5,6 +5,36 @@
 
 .hidden { display: none !important; }
 
+.rules-help {
+  margin-top: 8px;
+  padding: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  text-transform: none;
+  font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rules-help a { color: var(--orange); }
+.rules-help ol { margin: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; }
+.rules-snippet {
+  background: #0D0D14;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 180px;
+}
+
 .admin-gate {
   min-height: 100vh;
   display: flex;

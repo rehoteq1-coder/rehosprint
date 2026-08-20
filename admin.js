@@ -2,12 +2,11 @@
 // RehoSprint — Admin Console Logic (admin.html)
 // ============================================================
 // FIRST-TIME SETUP (Boss T):
-// 1. Firebase Console > Authentication > Users > Add user
-//    (create your own admin email + password here)
-// 2. Copy the User UID shown after creation
-// 3. Firebase Console > Realtime Database > add a node:
-//      admins/{that-uid} = true
-// Only UIDs listed under /admins can access this console.
+// 1. Firebase Console > Authentication > Sign-in method > enable Email/Password
+// 2. Firebase Console > Realtime Database > Rules > publish database.rules.json
+//    (auth != null read/write). The login screen copies these if they are locked.
+// 3. Log in on admin.html — the first email account becomes a host
+//    (writes admins/{uid} = true). Extra hosts can still be added under /admins.
 // ============================================================
 
 (() => {
@@ -30,11 +29,55 @@
   const loginErrorEl = $("admin-login-error");
   const loginBtn = $("btn-admin-login") || (loginForm && loginForm.querySelector("button[type='submit']"));
 
-  function showLoginGate(message) {
+  const FIREBASE_RULES_TEXT = `{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+    "events": {
+      ".indexOn": ["hostUid"],
+      "$eventId": {
+        "sessions": {
+          ".indexOn": ["createdAt"]
+        }
+      }
+    }
+  }
+}`;
+
+  const rulesHelpEl = $("admin-rules-help");
+  const rulesSnippetEl = $("firebase-rules-snippet");
+  if (rulesSnippetEl) rulesSnippetEl.textContent = FIREBASE_RULES_TEXT;
+
+  function isPermissionDenied(err) {
+    const text = `${(err && err.code) || ""} ${(err && err.message) || ""}`;
+    return /permission_denied|PERMISSION_DENIED|Permission denied/i.test(text);
+  }
+
+  function showRulesHelp(visible) {
+    if (!rulesHelpEl) return;
+    rulesHelpEl.classList.toggle("hidden", !visible);
+  }
+
+  function showLoginGate(message, opts) {
     currentUser = null;
     $("admin-login-view").classList.remove("hidden");
     $("admin-dashboard").classList.add("hidden");
-    if (message && loginErrorEl) loginErrorEl.textContent = message;
+    if (loginErrorEl) loginErrorEl.textContent = message || "";
+    showRulesHelp(!!(opts && opts.rulesHelp));
+  }
+
+  const copyRulesBtn = $("btn-copy-rules");
+  if (copyRulesBtn) {
+    copyRulesBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(FIREBASE_RULES_TEXT);
+        const original = copyRulesBtn.textContent;
+        copyRulesBtn.textContent = "Copied!";
+        setTimeout(() => { copyRulesBtn.textContent = original; }, 1800);
+      } catch (err) {
+        prompt("Copy these rules and paste them in Firebase:", FIREBASE_RULES_TEXT);
+      }
+    });
   }
 
   function friendlyAdminAuthError(err) {
@@ -97,30 +140,48 @@
   // ----------------------------------------------------------
   // AUTH
   // ----------------------------------------------------------
+  async function ensureHostAccess(user) {
+    const mineRef = db.ref(`admins/${user.uid}`);
+    const mineSnap = await mineRef.get();
+    if (mineSnap.exists() && mineSnap.val()) return true;
+
+    const allSnap = await db.ref("admins").get();
+    if (!allSnap.exists()) {
+      await mineRef.set(true);
+      return true;
+    }
+    const all = allSnap.val() || {};
+    return !!all[user.uid];
+  }
+
   async function enterAdmin(user) {
     if (!user || user.isAnonymous) {
       showLoginGate();
-      if (user && user.isAnonymous) {
-        try { await auth.signOut(); } catch (e) { /* ignore */ }
-      }
       return false;
     }
+    if (currentUser && currentUser.uid === user.uid && !$("admin-dashboard").classList.contains("hidden")) {
+      return true;
+    }
     try {
-      const adminSnap = await db.ref(`admins/${user.uid}`).get();
-      if (!adminSnap.exists()) {
+      const allowed = await ensureHostAccess(user);
+      if (!allowed) {
         showLoginGate("This account isn't authorized as a RehoSprint host. Contact the platform owner to be granted access.");
-        try { await auth.signOut(); } catch (e) { /* ignore */ }
         return false;
       }
       currentUser = user;
       $("admin-whoami").textContent = user.email || "";
       $("admin-login-view").classList.add("hidden");
       $("admin-dashboard").classList.remove("hidden");
+      showRulesHelp(false);
       loadEvents();
       return true;
     } catch (err) {
       console.error(err);
-      showLoginGate("Couldn't verify host access. Check your connection and try again.");
+      if (isPermissionDenied(err)) {
+        showLoginGate("Permission denied — Firebase database rules are locked.", { rulesHelp: true });
+      } else {
+        showLoginGate("Couldn't verify host access. Check your connection and try again.");
+      }
       return false;
     }
   }
@@ -131,11 +192,9 @@
   }
 
   auth.onAuthStateChanged(async (user) => {
+    if (loginInProgress) return;
     if (!user || user.isAnonymous) {
       showLoginGate();
-      if (user && user.isAnonymous) {
-        try { await auth.signOut(); } catch (e) { /* ignore */ }
-      }
       return;
     }
     await enterAdmin(user);
@@ -217,8 +276,9 @@
   });
 
   async function loadEvents() {
-    const snap = await db.ref("events").orderByChild("hostUid").equalTo(currentUser.uid).get();
     const listEl = $("events-list");
+    try {
+    const snap = await db.ref("events").orderByChild("hostUid").equalTo(currentUser.uid).get();
     listEl.innerHTML = "";
     if (!snap.exists()) {
       listEl.innerHTML = `<p class="muted">No events yet — create one to get started.</p>`;
@@ -241,6 +301,12 @@
       row.querySelector("button").addEventListener("click", () => selectEvent(ev.id));
       listEl.appendChild(row);
     });
+    } catch (err) {
+      console.error(err);
+      if (listEl) {
+        listEl.innerHTML = `<p class="error">${isPermissionDenied(err) ? "Permission denied — publish the Firebase database rules shown on the login screen." : "Couldn't load events."}</p>`;
+      }
+    }
   }
 
   async function selectEvent(eventId) {
@@ -316,7 +382,7 @@
       renderSchoolsList();
       computeAndRenderPlanPreview();
       if (drawData) renderDrawUI();
-    });
+    }, (err) => console.error(err));
   }
 
   function renderSchoolsSummary() {
@@ -478,7 +544,7 @@
     db.ref(`events/${eventId}/draw`).on("value", (snap) => {
       drawData = snap.exists() ? snap.val() : null;
       renderDrawUI();
-    });
+    }, (err) => console.error(err));
   }
 
   function computeAndRenderPlanPreview() {
@@ -1008,13 +1074,13 @@ Rules:
       sessionData = snap.val();
       if (!sessionData) return;
       renderLiveState();
-    });
+    }, (err) => console.error(err));
     liveListeners.push({ ref: sessionRef, cb });
 
     const participantsRef = db.ref(`events/${activeEventId}/participants`);
     const pcb = participantsRef.on("value", (snap) => {
       $("stat-total").textContent = snap.exists() ? Object.keys(snap.val()).length : 0;
-    });
+    }, (err) => console.error(err));
     liveListeners.push({ ref: participantsRef, cb: pcb });
   }
 
