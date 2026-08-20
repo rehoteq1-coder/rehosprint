@@ -81,6 +81,63 @@
     });
   }
 
+  const AI_WORKER_TEXT = `export default {
+  async fetch(request, env) {
+    const cors = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type"
+    };
+    if (request.method === "OPTIONS") return new Response(null, { headers: cors });
+    if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
+
+    const key = env.GROQ_API_KEY || env.GROQ_KEY || env.API_KEY;
+    if (!key) {
+      return new Response(JSON.stringify({ error: { message: "GROQ_API_KEY not configured" } }), {
+        status: 500, headers: { "Content-Type": "application/json", ...cors }
+      });
+    }
+
+    const body = await request.json();
+    const prompt = body.prompt || (body.messages && body.messages[0] && body.messages[0].content) || "";
+    const model = body.model || "openai/gpt-oss-120b";
+    const messages = (body.messages && body.messages.length) ? body.messages : [{ role: "user", content: prompt }];
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages, temperature: 0.4 })
+    });
+    return new Response(await res.text(), {
+      status: res.status,
+      headers: { "Content-Type": "application/json", ...cors }
+    });
+  }
+};`;
+
+  const workerHelpEl = $("ai-worker-help");
+  const workerSnippetEl = $("ai-worker-snippet");
+  if (workerSnippetEl) workerSnippetEl.textContent = AI_WORKER_TEXT;
+
+  function showWorkerHelp(visible) {
+    if (!workerHelpEl) return;
+    workerHelpEl.classList.toggle("hidden", !visible);
+  }
+
+  const copyWorkerBtn = $("btn-copy-worker");
+  if (copyWorkerBtn) {
+    copyWorkerBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(AI_WORKER_TEXT);
+        const original = copyWorkerBtn.textContent;
+        copyWorkerBtn.textContent = "Copied!";
+        setTimeout(() => { copyWorkerBtn.textContent = original; }, 1800);
+      } catch (err) {
+        prompt("Copy this worker code and paste it in Cloudflare:", AI_WORKER_TEXT);
+      }
+    });
+  }
+
   function friendlyAdminAuthError(err) {
     const code = err && err.code;
     const map = {
@@ -844,6 +901,7 @@
     e.preventDefault();
     const errorEl = $("ai-generate-error");
     errorEl.textContent = "";
+    showWorkerHelp(false);
     if (!activeEventId) { errorEl.textContent = "Select an event first."; return; }
 
     const btn = $("btn-ai-generate");
@@ -895,10 +953,12 @@ Rules:
       }
       if (data.error) {
         const msg = data.error.message || data.error || "API error";
-        if (/llama-3\.3-70b-versatile|does not exist|do not have access/i.test(String(msg))) {
-          throw new Error("Groq retired the old AI model. The worker must use openai/gpt-oss-120b — paste ai-worker.js into Cloudflare Worker lesson-ai, then Save & Deploy.");
-        }
-        throw new Error(msg);
+        const retired = /llama-3\.3-70b-versatile|does not exist|do not have access/i.test(String(msg));
+        const err = new Error(retired
+          ? "Groq retired the old model. Replace the Cloudflare worker code (box below), then generate again."
+          : msg);
+        err.workerHelp = retired;
+        throw err;
       }
 
       const text = extractAIText(data);
@@ -911,7 +971,9 @@ Rules:
         throw new Error("Couldn't parse the AI's response as question data. Try again.");
       }
 
-      aiDraftQuestions = parsed.map(q => ({
+      const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.questions) ? parsed.questions : []);
+      if (!list.length) throw new Error("The AI returned no questions. Try again.");
+      aiDraftQuestions = list.map(q => ({
         text: q.text || "",
         options: Array.isArray(q.options) && q.options.length === 4 ? q.options : ["", "", "", ""],
         correctIndex: typeof q.correctIndex === "number" ? q.correctIndex : 0
@@ -920,6 +982,7 @@ Rules:
     } catch (err) {
       console.error(err);
       errorEl.textContent = err.message || "Couldn't generate questions. Try again.";
+      if (err && err.workerHelp) showWorkerHelp(true);
     } finally {
       btn.disabled = false;
       btn.textContent = originalLabel;
