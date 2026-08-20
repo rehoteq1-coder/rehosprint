@@ -17,6 +17,7 @@
   const AI_GENERATE_ENDPOINT = "https://lesson-ai.rehoteq.workers.dev";
 
   let currentUser = null;
+  let loginInProgress = false;
   let activeEventId = null;
   let activeEventData = null;
   let questionBank = {}; // { questionId: {...} }
@@ -25,38 +26,119 @@
   let liveListeners = [];
 
   const $ = (id) => document.getElementById(id);
+  const loginForm = $("admin-login-form");
+  const loginErrorEl = $("admin-login-error");
+  const loginBtn = $("btn-admin-login") || (loginForm && loginForm.querySelector("button[type='submit']"));
+
+  function showLoginGate(message) {
+    currentUser = null;
+    $("admin-login-view").classList.remove("hidden");
+    $("admin-dashboard").classList.add("hidden");
+    if (message && loginErrorEl) loginErrorEl.textContent = message;
+  }
+
+  function friendlyAdminAuthError(err) {
+    const code = err && err.code;
+    const map = {
+      "auth/invalid-email": "Please enter a valid email address.",
+      "auth/user-not-found": "No host account found with that email.",
+      "auth/wrong-password": "Incorrect password. Try again.",
+      "auth/invalid-credential": "Login failed. Check your email and password.",
+      "auth/invalid-login-credentials": "Login failed. Check your email and password.",
+      "auth/too-many-requests": "Too many attempts. Please wait a moment and try again.",
+      "auth/network-request-failed": "Network error. Check your connection and try again.",
+      "auth/user-disabled": "This account has been disabled."
+    };
+    return map[code] || "Login failed. Check your email and password.";
+  }
+
+  // Always bind submit first so a Firebase load failure can't leave the
+  // button doing a silent native form reload ("login not firing").
+  async function handleAdminLogin(e) {
+    if (e) e.preventDefault();
+    if (loginErrorEl) loginErrorEl.textContent = "";
+    if (typeof auth === "undefined" || typeof db === "undefined") {
+      if (loginErrorEl) loginErrorEl.textContent = "Couldn't load authentication. Refresh the page.";
+      return;
+    }
+    const email = ($("admin-email") && $("admin-email").value || "").trim();
+    const password = $("admin-password") && $("admin-password").value;
+    if (!email || !password) {
+      if (loginErrorEl) loginErrorEl.textContent = "Enter your email and password.";
+      return;
+    }
+    const originalLabel = loginBtn ? loginBtn.textContent : "";
+    loginInProgress = true;
+    if (loginBtn) {
+      loginBtn.disabled = true;
+      loginBtn.textContent = "Signing in…";
+    }
+    try {
+      const cred = await auth.signInWithEmailAndPassword(email, password);
+      // signIn with the already-signed-in user does not re-fire
+      // onAuthStateChanged — run the host gate explicitly.
+      await enterAdmin(cred.user);
+    } catch (err) {
+      console.error(err);
+      if (loginErrorEl) loginErrorEl.textContent = friendlyAdminAuthError(err);
+    } finally {
+      loginInProgress = false;
+      if (loginBtn) {
+        loginBtn.disabled = false;
+        loginBtn.textContent = originalLabel || "Log In";
+      }
+    }
+  }
+
+  if (loginForm) {
+    loginForm.addEventListener("submit", handleAdminLogin);
+  }
 
   // ----------------------------------------------------------
   // AUTH
   // ----------------------------------------------------------
-  auth.onAuthStateChanged(async (user) => {
-    if (!user) {
-      $("admin-login-view").classList.remove("hidden");
-      $("admin-dashboard").classList.add("hidden");
-      return;
+  async function enterAdmin(user) {
+    if (!user || user.isAnonymous) {
+      showLoginGate();
+      if (user && user.isAnonymous) {
+        try { await auth.signOut(); } catch (e) { /* ignore */ }
+      }
+      return false;
     }
-    const adminSnap = await db.ref(`admins/${user.uid}`).get();
-    if (!adminSnap.exists()) {
-      alert("This account isn't authorized as a RehoSprint host. Contact the platform owner to be granted access.");
-      await auth.signOut();
-      return;
-    }
-    currentUser = user;
-    $("admin-whoami").textContent = user.email;
-    $("admin-login-view").classList.add("hidden");
-    $("admin-dashboard").classList.remove("hidden");
-    loadEvents();
-  });
-
-  $("admin-login-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const errorEl = $("admin-login-error");
-    errorEl.textContent = "";
     try {
-      await auth.signInWithEmailAndPassword($("admin-email").value.trim(), $("admin-password").value);
+      const adminSnap = await db.ref(`admins/${user.uid}`).get();
+      if (!adminSnap.exists()) {
+        showLoginGate("This account isn't authorized as a RehoSprint host. Contact the platform owner to be granted access.");
+        try { await auth.signOut(); } catch (e) { /* ignore */ }
+        return false;
+      }
+      currentUser = user;
+      $("admin-whoami").textContent = user.email || "";
+      $("admin-login-view").classList.add("hidden");
+      $("admin-dashboard").classList.remove("hidden");
+      loadEvents();
+      return true;
     } catch (err) {
-      errorEl.textContent = "Login failed. Check your email and password.";
+      console.error(err);
+      showLoginGate("Couldn't verify host access. Check your connection and try again.");
+      return false;
     }
+  }
+
+  if (typeof auth === "undefined") {
+    showLoginGate("Couldn't load authentication. Refresh the page.");
+    return;
+  }
+
+  auth.onAuthStateChanged(async (user) => {
+    if (!user || user.isAnonymous) {
+      showLoginGate();
+      if (user && user.isAnonymous) {
+        try { await auth.signOut(); } catch (e) { /* ignore */ }
+      }
+      return;
+    }
+    await enterAdmin(user);
   });
 
   $("btn-logout").addEventListener("click", () => auth.signOut());

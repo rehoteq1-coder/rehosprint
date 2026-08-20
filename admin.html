@@ -20,10 +20,10 @@
     <p class="tagline">Host Console</p>
     <form id="admin-login-form" class="panel form-view active">
       <label for="admin-email">Email</label>
-      <input type="text" id="admin-email" required autocomplete="username">
+      <input type="email" id="admin-email" name="email" required autocomplete="username">
       <label for="admin-password">Password</label>
-      <input type="password" id="admin-password" required autocomplete="current-password">
-      <button type="submit" class="btn-primary">Log In</button>
+      <input type="password" id="admin-password" name="password" required autocomplete="current-password">
+      <button type="submit" class="btn-primary" id="btn-admin-login">Log In</button>
       <p class="error" id="admin-login-error"></p>
     </form>
   </section>
