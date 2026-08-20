@@ -10,10 +10,11 @@
 // ============================================================
 
 (() => {
-  // Reuses the same Cloudflare Worker already deployed for lesson-ai.html —
-  // no separate Worker needed. It accepts { prompt } and returns text in
-  // one of several provider response shapes, handled below.
+  // Reuses the Cloudflare Worker already deployed for lesson-ai.html.
+  // Groq retired llama-3.3-70b-versatile on 16 Aug 2026 — send the
+  // replacement so a worker that does `body.model || default` picks it up.
   const AI_GENERATE_ENDPOINT = "https://lesson-ai.rehoteq.workers.dev";
+  const AI_MODEL = "openai/gpt-oss-120b";
 
   let currentUser = null;
   let loginInProgress = false;
@@ -809,6 +810,33 @@
     }
   });
 
+  function extractAIText(data) {
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      const m = data.choices[0].message;
+      return (m.content || m.reasoning || "").toString();
+    }
+    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+      return data.candidates[0].content.parts[0].text;
+    }
+    if (data.content && data.content[0]) return data.content[0].text;
+    if (typeof data === "string") return data;
+    return "";
+  }
+
+  function parseQuestionsJson(text) {
+    let cleaned = String(text || "").trim();
+    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    cleaned = cleaned.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/g, "").trim();
+    try { return JSON.parse(cleaned); } catch (e) { /* fall through */ }
+    const start = cleaned.indexOf("[");
+    const end = cleaned.lastIndexOf("]");
+    if (start !== -1 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+    const objStart = cleaned.indexOf("{");
+    const objEnd = cleaned.lastIndexOf("}");
+    if (objStart !== -1 && objEnd > objStart) return JSON.parse(cleaned.slice(objStart, objEnd + 1));
+    throw new Error("not json");
+  }
+
   // ----------------------------------------------------------
   // AI QUESTION GENERATION
   // ----------------------------------------------------------
@@ -837,7 +865,7 @@
 
     const prompt = `Generate ${payload.count} multiple-choice quiz questions for a ${payload.level} audience, ${payload.difficulty} difficulty, on the subject "${payload.subject}"${payload.topic ? `, focused specifically on the topic "${payload.topic}"` : ""}.
 
-Return ONLY a valid JSON array, with no markdown formatting, no code fences, and no preamble or explanation text. Each element must have exactly this shape:
+Return ONLY a valid JSON array, with no markdown, no code fences, no reasoning, and no preamble. Each element must have exactly this shape:
 {"text": "question text here", "options": ["option A", "option B", "option C", "option D"], "correctIndex": 0}
 
 Rules:
@@ -851,7 +879,11 @@ Rules:
       const res = await fetch(AI_GENERATE_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({
+          prompt,
+          model: AI_MODEL,
+          messages: [{ role: "user", content: prompt }]
+        })
       });
 
       const rawResponseText = await res.text();
@@ -861,24 +893,20 @@ Rules:
       } catch (e) {
         throw new Error("Worker returned an invalid response: " + rawResponseText.substring(0, 100));
       }
-      if (data.error) throw new Error(data.error.message || data.error || "API error");
-
-      // Handle multiple possible provider response shapes (same pattern as lesson-ai.html)
-      let text = "";
-      if (data.choices && data.choices[0] && data.choices[0].message) {
-        text = data.choices[0].message.content;
-      } else if (data.candidates && data.candidates[0]) {
-        text = data.candidates[0].content.parts[0].text;
-      } else if (data.content && data.content[0]) {
-        text = data.content[0].text;
-      } else {
-        throw new Error("Empty response from AI. Please try again.");
+      if (data.error) {
+        const msg = data.error.message || data.error || "API error";
+        if (/llama-3\.3-70b-versatile|does not exist|do not have access/i.test(String(msg))) {
+          throw new Error("Groq retired the old AI model. The worker must use openai/gpt-oss-120b — paste ai-worker.js into Cloudflare Worker lesson-ai, then Save & Deploy.");
+        }
+        throw new Error(msg);
       }
 
-      text = text.trim().replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+      const text = extractAIText(data);
+      if (!text) throw new Error("Empty response from AI. Please try again.");
+
       let parsed;
       try {
-        parsed = JSON.parse(text);
+        parsed = parseQuestionsJson(text);
       } catch (e) {
         throw new Error("Couldn't parse the AI's response as question data. Try again.");
       }
