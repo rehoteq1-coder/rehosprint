@@ -37,6 +37,7 @@
         <button type="button" class="btn-secondary" id="btn-copy-rules">Copy rules</button>
         <pre id="firebase-rules-snippet" class="rules-snippet"></pre>
       </div>
+    </form>
   </section>
 
   <!-- ============ ADMIN DASHBOARD (hidden until authenticated) ============ -->
@@ -268,7 +269,7 @@
                 <li>Click <strong>Save and Deploy</strong></li>
                 <li>Come back here and press Generate Questions again</li>
               </ol>
-              <p class="hint">Do not delete the GROQ_API_KEY secret — only replace the code.</p>
+              <p class="hint">If it says the Groq key is missing: lesson-ai → Settings → Variables and Secrets → Add a Secret named GROQ_API_KEY (your Groq key starts with gsk_).</p>
               <button type="button" class="btn-secondary" id="btn-copy-worker">Copy worker</button>
               <pre id="ai-worker-snippet" class="rules-snippet"></pre>
             </div>

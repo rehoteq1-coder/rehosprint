@@ -81,7 +81,15 @@
     });
   }
 
-  const AI_WORKER_TEXT = `export default {
+  const AI_WORKER_TEXT = `function groqKey(env) {
+  const named = env.GROQ_API_KEY || env.GROQ_KEY || env.API_KEY || env.GROQ || env.GROQAPIKEY || env.GROQ_TOKEN || env.AI_KEY;
+  if (named) return named;
+  for (const value of Object.values(env || {})) {
+    if (typeof value === "string" && value.startsWith("gsk_")) return value;
+  }
+  return "";
+}
+export default {
   async fetch(request, env) {
     const cors = {
       "Access-Control-Allow-Origin": "*",
@@ -91,9 +99,9 @@
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
 
-    const key = env.GROQ_API_KEY || env.GROQ_KEY || env.API_KEY;
+    const key = groqKey(env);
     if (!key) {
-      return new Response(JSON.stringify({ error: { message: "GROQ_API_KEY not configured" } }), {
+      return new Response(JSON.stringify({ error: { message: "No Groq key on this Worker. Add a Secret named GROQ_API_KEY (starts with gsk_)." } }), {
         status: 500, headers: { "Content-Type": "application/json", ...cors }
       });
     }
@@ -953,7 +961,7 @@ Rules:
       }
       if (data.error) {
         const msg = data.error.message || data.error || "API error";
-        const retired = /llama-3\.3-70b-versatile|does not exist|do not have access/i.test(String(msg));
+        const retired = /llama-3\.3-70b-versatile|does not exist|do not have access|GROQ_API_KEY not configured|No Groq key/i.test(String(msg));
         const err = new Error(retired
           ? "Groq retired the old model. Replace the Cloudflare worker code (box below), then generate again."
           : msg);
