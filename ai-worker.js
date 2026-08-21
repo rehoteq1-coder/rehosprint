@@ -1,18 +1,23 @@
 /**
  * RehoSprint / Lesson AI — Cloudflare Worker
  *
- * Groq retired llama-3.3-70b-versatile on 16 Aug 2026.
- * Defaults to openai/gpt-oss-120b. Uses any Groq secret already on the worker
- * (GROQ_API_KEY, GROQ_KEY, API_KEY, or a value starting with gsk_).
- *
- * Deploy: Cloudflare → Workers → lesson-ai → Edit code → paste → Save & Deploy.
+ * Must be ES Module format (export default). Reads GROQ_API_KEY from
+ * env bindings or any secret whose value starts with gsk_.
  */
 function groqKey(env) {
-  const named = env.GROQ_API_KEY || env.GROQ_KEY || env.API_KEY || env.GROQ
-    || env.GROQAPIKEY || env.GROQ_TOKEN || env.AI_KEY || env.LESSON_AI_KEY;
-  if (named) return named;
-  for (const value of Object.values(env || {})) {
-    if (typeof value === "string" && value.startsWith("gsk_")) return value;
+  const sources = [env, globalThis];
+  for (const src of sources) {
+    if (!src) continue;
+    let keys = [];
+    try { keys = Object.keys(src); } catch (e) { continue; }
+    for (const k of keys) {
+      let v;
+      try { v = src[k]; } catch (e) { continue; }
+      if (typeof v !== "string" || v.length < 8) continue;
+      if (v.startsWith("gsk_")) return v;
+      const norm = k.replace(/[^a-z0-9]/gi, "").toLowerCase();
+      if (norm === "groqapikey" || norm === "groqkey" || norm === "apikey") return v;
+    }
   }
   return "";
 }
@@ -28,22 +33,30 @@ export default {
   async fetch(request, env) {
     const cors = {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type"
     };
 
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: cors });
     }
+
+    const key = groqKey(env);
+    let envNames = [];
+    try { envNames = env ? Object.keys(env) : []; } catch (e) { envNames = []; }
+
+    if (request.method === "GET") {
+      return json({ ok: true, hasKey: !!key, envNames }, 200, cors);
+    }
+
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405, headers: cors });
     }
 
-    const key = groqKey(env);
     if (!key) {
       return json({
         error: {
-          message: "No Groq key on this Worker. In lesson-ai → Settings → Variables and Secrets, add a Secret named GROQ_API_KEY (your Groq key starts with gsk_)."
+          message: "GROQ_API_KEY not found on this Worker. Add a Secret named exactly GROQ_API_KEY, then Save and Deploy. Bindings seen: " + (envNames.join(", ") || "(none)")
         }
       }, 500, cors);
     }
