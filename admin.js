@@ -2,21 +2,22 @@
 // RehoSprint — Admin Console Logic (admin.html)
 // ============================================================
 // FIRST-TIME SETUP (Boss T):
-// 1. Firebase Console > Authentication > Users > Add user
-//    (create your own admin email + password here)
-// 2. Copy the User UID shown after creation
-// 3. Firebase Console > Realtime Database > add a node:
-//      admins/{that-uid} = true
-// Only UIDs listed under /admins can access this console.
+// 1. Firebase Console > Authentication > Sign-in method > enable Email/Password
+// 2. Firebase Console > Realtime Database > Rules > publish database.rules.json
+//    (auth != null read/write). The login screen copies these if they are locked.
+// 3. Log in on admin.html — the first email account becomes a host
+//    (writes admins/{uid} = true). Extra hosts can still be added under /admins.
 // ============================================================
 
 (() => {
-  // Reuses the same Cloudflare Worker already deployed for lesson-ai.html —
-  // no separate Worker needed. It accepts { prompt } and returns text in
-  // one of several provider response shapes, handled below.
+  // Reuses the Cloudflare Worker already deployed for lesson-ai.html.
+  // Groq retired llama-3.3-70b-versatile on 16 Aug 2026 — send the
+  // replacement so a worker that does `body.model || default` picks it up.
   const AI_GENERATE_ENDPOINT = "https://lesson-ai.rehoteq.workers.dev";
+  const AI_MODEL = "openai/gpt-oss-120b";
 
   let currentUser = null;
+  let loginInProgress = false;
   let activeEventId = null;
   let activeEventData = null;
   let questionBank = {}; // { questionId: {...} }
@@ -25,38 +26,244 @@
   let liveListeners = [];
 
   const $ = (id) => document.getElementById(id);
+  const loginForm = $("admin-login-form");
+  const loginErrorEl = $("admin-login-error");
+  const loginBtn = $("btn-admin-login") || (loginForm && loginForm.querySelector("button[type='submit']"));
+
+  const FIREBASE_RULES_TEXT = `{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+    "events": {
+      ".indexOn": ["hostUid"],
+      "$eventId": {
+        "sessions": {
+          ".indexOn": ["createdAt"]
+        }
+      }
+    }
+  }
+}`;
+
+  const rulesHelpEl = $("admin-rules-help");
+  const rulesSnippetEl = $("firebase-rules-snippet");
+  if (rulesSnippetEl) rulesSnippetEl.textContent = FIREBASE_RULES_TEXT;
+
+  function isPermissionDenied(err) {
+    const text = `${(err && err.code) || ""} ${(err && err.message) || ""}`;
+    return /permission_denied|PERMISSION_DENIED|Permission denied/i.test(text);
+  }
+
+  function showRulesHelp(visible) {
+    if (!rulesHelpEl) return;
+    rulesHelpEl.classList.toggle("hidden", !visible);
+  }
+
+  function showLoginGate(message, opts) {
+    currentUser = null;
+    $("admin-login-view").classList.remove("hidden");
+    $("admin-dashboard").classList.add("hidden");
+    if (loginErrorEl) loginErrorEl.textContent = message || "";
+    showRulesHelp(!!(opts && opts.rulesHelp));
+  }
+
+  const copyRulesBtn = $("btn-copy-rules");
+  if (copyRulesBtn) {
+    copyRulesBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(FIREBASE_RULES_TEXT);
+        const original = copyRulesBtn.textContent;
+        copyRulesBtn.textContent = "Copied!";
+        setTimeout(() => { copyRulesBtn.textContent = original; }, 1800);
+      } catch (err) {
+        prompt("Copy these rules and paste them in Firebase:", FIREBASE_RULES_TEXT);
+      }
+    });
+  }
+
+  const AI_WORKER_TEXT = `function groqKey(env) {
+  const named = env.GROQ_API_KEY || env.GROQ_KEY || env.API_KEY || env.GROQ || env.GROQAPIKEY || env.GROQ_TOKEN || env.AI_KEY;
+  if (named) return named;
+  for (const value of Object.values(env || {})) {
+    if (typeof value === "string" && value.startsWith("gsk_")) return value;
+  }
+  return "";
+}
+export default {
+  async fetch(request, env) {
+    const cors = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type"
+    };
+    if (request.method === "OPTIONS") return new Response(null, { headers: cors });
+    if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
+
+    const key = groqKey(env);
+    if (!key) {
+      return new Response(JSON.stringify({ error: { message: "No Groq key on this Worker. Add a Secret named GROQ_API_KEY (starts with gsk_)." } }), {
+        status: 500, headers: { "Content-Type": "application/json", ...cors }
+      });
+    }
+
+    const body = await request.json();
+    const prompt = body.prompt || (body.messages && body.messages[0] && body.messages[0].content) || "";
+    const model = body.model || "openai/gpt-oss-120b";
+    const messages = (body.messages && body.messages.length) ? body.messages : [{ role: "user", content: prompt }];
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages, temperature: 0.4 })
+    });
+    return new Response(await res.text(), {
+      status: res.status,
+      headers: { "Content-Type": "application/json", ...cors }
+    });
+  }
+};`;
+
+  const workerHelpEl = $("ai-worker-help");
+  const workerSnippetEl = $("ai-worker-snippet");
+  if (workerSnippetEl) workerSnippetEl.textContent = AI_WORKER_TEXT;
+
+  function showWorkerHelp(visible) {
+    if (!workerHelpEl) return;
+    workerHelpEl.classList.toggle("hidden", !visible);
+  }
+
+  const copyWorkerBtn = $("btn-copy-worker");
+  if (copyWorkerBtn) {
+    copyWorkerBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(AI_WORKER_TEXT);
+        const original = copyWorkerBtn.textContent;
+        copyWorkerBtn.textContent = "Copied!";
+        setTimeout(() => { copyWorkerBtn.textContent = original; }, 1800);
+      } catch (err) {
+        prompt("Copy this worker code and paste it in Cloudflare:", AI_WORKER_TEXT);
+      }
+    });
+  }
+
+  function friendlyAdminAuthError(err) {
+    const code = err && err.code;
+    const map = {
+      "auth/invalid-email": "Please enter a valid email address.",
+      "auth/user-not-found": "No host account found with that email.",
+      "auth/wrong-password": "Incorrect password. Try again.",
+      "auth/invalid-credential": "Login failed. Check your email and password.",
+      "auth/invalid-login-credentials": "Login failed. Check your email and password.",
+      "auth/too-many-requests": "Too many attempts. Please wait a moment and try again.",
+      "auth/network-request-failed": "Network error. Check your connection and try again.",
+      "auth/user-disabled": "This account has been disabled."
+    };
+    return map[code] || "Login failed. Check your email and password.";
+  }
+
+  // Always bind submit first so a Firebase load failure can't leave the
+  // button doing a silent native form reload ("login not firing").
+  async function handleAdminLogin(e) {
+    if (e) e.preventDefault();
+    if (loginErrorEl) loginErrorEl.textContent = "";
+    if (typeof auth === "undefined" || typeof db === "undefined") {
+      if (loginErrorEl) loginErrorEl.textContent = "Couldn't load authentication. Refresh the page.";
+      return;
+    }
+    const email = ($("admin-email") && $("admin-email").value || "").trim();
+    const password = $("admin-password") && $("admin-password").value;
+    if (!email || !password) {
+      if (loginErrorEl) loginErrorEl.textContent = "Enter your email and password.";
+      return;
+    }
+    const originalLabel = loginBtn ? loginBtn.textContent : "";
+    loginInProgress = true;
+    if (loginBtn) {
+      loginBtn.disabled = true;
+      loginBtn.textContent = "Signing in…";
+    }
+    try {
+      const cred = await auth.signInWithEmailAndPassword(email, password);
+      // signIn with the already-signed-in user does not re-fire
+      // onAuthStateChanged — run the host gate explicitly.
+      await enterAdmin(cred.user);
+    } catch (err) {
+      console.error(err);
+      if (loginErrorEl) loginErrorEl.textContent = friendlyAdminAuthError(err);
+    } finally {
+      loginInProgress = false;
+      if (loginBtn) {
+        loginBtn.disabled = false;
+        loginBtn.textContent = originalLabel || "Log In";
+      }
+    }
+  }
+
+  if (loginForm) {
+    loginForm.addEventListener("submit", handleAdminLogin);
+  }
 
   // ----------------------------------------------------------
   // AUTH
   // ----------------------------------------------------------
-  auth.onAuthStateChanged(async (user) => {
-    if (!user) {
-      $("admin-login-view").classList.remove("hidden");
-      $("admin-dashboard").classList.add("hidden");
-      return;
-    }
-    const adminSnap = await db.ref(`admins/${user.uid}`).get();
-    if (!adminSnap.exists()) {
-      alert("This account isn't authorized as a RehoSprint host. Contact the platform owner to be granted access.");
-      await auth.signOut();
-      return;
-    }
-    currentUser = user;
-    $("admin-whoami").textContent = user.email;
-    $("admin-login-view").classList.add("hidden");
-    $("admin-dashboard").classList.remove("hidden");
-    loadEvents();
-  });
+  async function ensureHostAccess(user) {
+    const mineRef = db.ref(`admins/${user.uid}`);
+    const mineSnap = await mineRef.get();
+    if (mineSnap.exists() && mineSnap.val()) return true;
 
-  $("admin-login-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const errorEl = $("admin-login-error");
-    errorEl.textContent = "";
-    try {
-      await auth.signInWithEmailAndPassword($("admin-email").value.trim(), $("admin-password").value);
-    } catch (err) {
-      errorEl.textContent = "Login failed. Check your email and password.";
+    const allSnap = await db.ref("admins").get();
+    if (!allSnap.exists()) {
+      await mineRef.set(true);
+      return true;
     }
+    const all = allSnap.val() || {};
+    return !!all[user.uid];
+  }
+
+  async function enterAdmin(user) {
+    if (!user || user.isAnonymous) {
+      showLoginGate();
+      return false;
+    }
+    if (currentUser && currentUser.uid === user.uid && !$("admin-dashboard").classList.contains("hidden")) {
+      return true;
+    }
+    try {
+      const allowed = await ensureHostAccess(user);
+      if (!allowed) {
+        showLoginGate("This account isn't authorized as a RehoSprint host. Contact the platform owner to be granted access.");
+        return false;
+      }
+      currentUser = user;
+      $("admin-whoami").textContent = user.email || "";
+      $("admin-login-view").classList.add("hidden");
+      $("admin-dashboard").classList.remove("hidden");
+      showRulesHelp(false);
+      loadEvents();
+      return true;
+    } catch (err) {
+      console.error(err);
+      if (isPermissionDenied(err)) {
+        showLoginGate("Permission denied — Firebase database rules are locked.", { rulesHelp: true });
+      } else {
+        showLoginGate("Couldn't verify host access. Check your connection and try again.");
+      }
+      return false;
+    }
+  }
+
+  if (typeof auth === "undefined") {
+    showLoginGate("Couldn't load authentication. Refresh the page.");
+    return;
+  }
+
+  auth.onAuthStateChanged(async (user) => {
+    if (loginInProgress) return;
+    if (!user || user.isAnonymous) {
+      showLoginGate();
+      return;
+    }
+    await enterAdmin(user);
   });
 
   $("btn-logout").addEventListener("click", () => auth.signOut());
@@ -135,8 +342,9 @@
   });
 
   async function loadEvents() {
-    const snap = await db.ref("events").orderByChild("hostUid").equalTo(currentUser.uid).get();
     const listEl = $("events-list");
+    try {
+    const snap = await db.ref("events").orderByChild("hostUid").equalTo(currentUser.uid).get();
     listEl.innerHTML = "";
     if (!snap.exists()) {
       listEl.innerHTML = `<p class="muted">No events yet — create one to get started.</p>`;
@@ -159,6 +367,12 @@
       row.querySelector("button").addEventListener("click", () => selectEvent(ev.id));
       listEl.appendChild(row);
     });
+    } catch (err) {
+      console.error(err);
+      if (listEl) {
+        listEl.innerHTML = `<p class="error">${isPermissionDenied(err) ? "Permission denied — publish the Firebase database rules shown on the login screen." : "Couldn't load events."}</p>`;
+      }
+    }
   }
 
   async function selectEvent(eventId) {
@@ -234,7 +448,7 @@
       renderSchoolsList();
       computeAndRenderPlanPreview();
       if (drawData) renderDrawUI();
-    });
+    }, (err) => console.error(err));
   }
 
   function renderSchoolsSummary() {
@@ -396,7 +610,7 @@
     db.ref(`events/${eventId}/draw`).on("value", (snap) => {
       drawData = snap.exists() ? snap.val() : null;
       renderDrawUI();
-    });
+    }, (err) => console.error(err));
   }
 
   function computeAndRenderPlanPreview() {
@@ -661,6 +875,33 @@
     }
   });
 
+  function extractAIText(data) {
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      const m = data.choices[0].message;
+      return (m.content || m.reasoning || "").toString();
+    }
+    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+      return data.candidates[0].content.parts[0].text;
+    }
+    if (data.content && data.content[0]) return data.content[0].text;
+    if (typeof data === "string") return data;
+    return "";
+  }
+
+  function parseQuestionsJson(text) {
+    let cleaned = String(text || "").trim();
+    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    cleaned = cleaned.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/g, "").trim();
+    try { return JSON.parse(cleaned); } catch (e) { /* fall through */ }
+    const start = cleaned.indexOf("[");
+    const end = cleaned.lastIndexOf("]");
+    if (start !== -1 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+    const objStart = cleaned.indexOf("{");
+    const objEnd = cleaned.lastIndexOf("}");
+    if (objStart !== -1 && objEnd > objStart) return JSON.parse(cleaned.slice(objStart, objEnd + 1));
+    throw new Error("not json");
+  }
+
   // ----------------------------------------------------------
   // AI QUESTION GENERATION
   // ----------------------------------------------------------
@@ -668,6 +909,7 @@
     e.preventDefault();
     const errorEl = $("ai-generate-error");
     errorEl.textContent = "";
+    showWorkerHelp(false);
     if (!activeEventId) { errorEl.textContent = "Select an event first."; return; }
 
     const btn = $("btn-ai-generate");
@@ -689,7 +931,7 @@
 
     const prompt = `Generate ${payload.count} multiple-choice quiz questions for a ${payload.level} audience, ${payload.difficulty} difficulty, on the subject "${payload.subject}"${payload.topic ? `, focused specifically on the topic "${payload.topic}"` : ""}.
 
-Return ONLY a valid JSON array, with no markdown formatting, no code fences, and no preamble or explanation text. Each element must have exactly this shape:
+Return ONLY a valid JSON array, with no markdown, no code fences, no reasoning, and no preamble. Each element must have exactly this shape:
 {"text": "question text here", "options": ["option A", "option B", "option C", "option D"], "correctIndex": 0}
 
 Rules:
@@ -703,7 +945,11 @@ Rules:
       const res = await fetch(AI_GENERATE_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({
+          prompt,
+          model: AI_MODEL,
+          messages: [{ role: "user", content: prompt }]
+        })
       });
 
       const rawResponseText = await res.text();
@@ -713,29 +959,29 @@ Rules:
       } catch (e) {
         throw new Error("Worker returned an invalid response: " + rawResponseText.substring(0, 100));
       }
-      if (data.error) throw new Error(data.error.message || data.error || "API error");
-
-      // Handle multiple possible provider response shapes (same pattern as lesson-ai.html)
-      let text = "";
-      if (data.choices && data.choices[0] && data.choices[0].message) {
-        text = data.choices[0].message.content;
-      } else if (data.candidates && data.candidates[0]) {
-        text = data.candidates[0].content.parts[0].text;
-      } else if (data.content && data.content[0]) {
-        text = data.content[0].text;
-      } else {
-        throw new Error("Empty response from AI. Please try again.");
+      if (data.error) {
+        const msg = data.error.message || data.error || "API error";
+        const retired = /llama-3\.3-70b-versatile|does not exist|do not have access|GROQ_API_KEY not configured|No Groq key/i.test(String(msg));
+        const err = new Error(retired
+          ? "Groq retired the old model. Replace the Cloudflare worker code (box below), then generate again."
+          : msg);
+        err.workerHelp = retired;
+        throw err;
       }
 
-      text = text.trim().replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+      const text = extractAIText(data);
+      if (!text) throw new Error("Empty response from AI. Please try again.");
+
       let parsed;
       try {
-        parsed = JSON.parse(text);
+        parsed = parseQuestionsJson(text);
       } catch (e) {
         throw new Error("Couldn't parse the AI's response as question data. Try again.");
       }
 
-      aiDraftQuestions = parsed.map(q => ({
+      const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.questions) ? parsed.questions : []);
+      if (!list.length) throw new Error("The AI returned no questions. Try again.");
+      aiDraftQuestions = list.map(q => ({
         text: q.text || "",
         options: Array.isArray(q.options) && q.options.length === 4 ? q.options : ["", "", "", ""],
         correctIndex: typeof q.correctIndex === "number" ? q.correctIndex : 0
@@ -744,6 +990,7 @@ Rules:
     } catch (err) {
       console.error(err);
       errorEl.textContent = err.message || "Couldn't generate questions. Try again.";
+      if (err && err.workerHelp) showWorkerHelp(true);
     } finally {
       btn.disabled = false;
       btn.textContent = originalLabel;
@@ -926,13 +1173,13 @@ Rules:
       sessionData = snap.val();
       if (!sessionData) return;
       renderLiveState();
-    });
+    }, (err) => console.error(err));
     liveListeners.push({ ref: sessionRef, cb });
 
     const participantsRef = db.ref(`events/${activeEventId}/participants`);
     const pcb = participantsRef.on("value", (snap) => {
       $("stat-total").textContent = snap.exists() ? Object.keys(snap.val()).length : 0;
-    });
+    }, (err) => console.error(err));
     liveListeners.push({ ref: participantsRef, cb: pcb });
   }
 

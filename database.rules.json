@@ -1,0 +1,14 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+    "events": {
+      ".indexOn": ["hostUid"],
+      "$eventId": {
+        "sessions": {
+          ".indexOn": ["createdAt"]
+        }
+      }
+    }
+  }
+}

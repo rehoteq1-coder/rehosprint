@@ -20,11 +20,23 @@
     <p class="tagline">Host Console</p>
     <form id="admin-login-form" class="panel form-view active">
       <label for="admin-email">Email</label>
-      <input type="text" id="admin-email" required autocomplete="username">
+      <input type="email" id="admin-email" name="email" required autocomplete="username">
       <label for="admin-password">Password</label>
-      <input type="password" id="admin-password" required autocomplete="current-password">
-      <button type="submit" class="btn-primary">Log In</button>
+      <input type="password" id="admin-password" name="password" required autocomplete="current-password">
+      <button type="submit" class="btn-primary" id="btn-admin-login">Log In</button>
       <p class="error" id="admin-login-error"></p>
+      <div id="admin-rules-help" class="rules-help hidden">
+        <p>Your email/password worked. Firebase then blocked the database, which is why you saw <strong>Permission denied</strong>.</p>
+        <p>Do this once, then log in again:</p>
+        <ol>
+          <li>Open <a href="https://console.firebase.google.com/project/rehosprint/database/rehosprint-default-rtdb/rules" target="_blank" rel="noopener">Firebase Rules</a> (Realtime Database → Rules)</li>
+          <li>Click <strong>Copy rules</strong> below and paste over everything in that page</li>
+          <li>Click <strong>Publish</strong></li>
+          <li>Come back here and press Log In again</li>
+        </ol>
+        <button type="button" class="btn-secondary" id="btn-copy-rules">Copy rules</button>
+        <pre id="firebase-rules-snippet" class="rules-snippet"></pre>
+      </div>
     </form>
   </section>
 
@@ -248,6 +260,19 @@
 
             <button type="submit" class="btn-primary" id="btn-ai-generate">Generate Questions</button>
             <p class="error" id="ai-generate-error"></p>
+            <div id="ai-worker-help" class="rules-help hidden">
+              <p>Groq retired the old model. The Cloudflare worker is still using it, so Generate cannot finish until you replace the worker code once.</p>
+              <ol>
+                <li>Open <a href="https://dash.cloudflare.com/?to=/:account/workers/services/view/lesson-ai" target="_blank" rel="noopener">Cloudflare → Workers → lesson-ai</a></li>
+                <li>Click <strong>Edit code</strong></li>
+                <li>Click <strong>Copy worker</strong> below, select all old code, paste this over it</li>
+                <li>Click <strong>Save and Deploy</strong></li>
+                <li>Come back here and press Generate Questions again</li>
+              </ol>
+              <p class="hint">If it says the Groq key is missing: lesson-ai → Settings → Variables and Secrets → Add a Secret named GROQ_API_KEY (your Groq key starts with gsk_).</p>
+              <button type="button" class="btn-secondary" id="btn-copy-worker">Copy worker</button>
+              <pre id="ai-worker-snippet" class="rules-snippet"></pre>
+            </div>
           </form>
 
           <div id="ai-review-wrap" class="hidden">
