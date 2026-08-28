@@ -15,6 +15,8 @@
   let lastRenderedStatus = null;
   let hasAnsweredCurrent = false;
   let stopTimer = null;
+  let stopSessionMeta = null;
+  let autoRevealFired = false;
 
   if (!eventId) {
     document.body.innerHTML = `<div class="p-stage"><p class="p-status-text">Missing event link. Please join again from the RehoSprint home page.</p></div>`;
@@ -57,7 +59,7 @@
       snap.forEach(child => { newSessionId = child.key; });
 
       if (newSessionId !== activeSessionId) {
-        if (activeSessionId) db.ref(`events/${eventId}/sessions/${activeSessionId}`).off();
+        if (activeSessionId && stopSessionMeta) stopSessionMeta();
         activeSessionId = newSessionId;
         watchSession(activeSessionId);
       }
@@ -65,11 +67,17 @@
   }
 
   function watchSession(sessionId) {
-    db.ref(`events/${eventId}/sessions/${sessionId}`).on("value", (snap) => {
-      sessionData = snap.val();
-      if (!sessionData) { showPanel("p-waiting"); return; }
-      handleSessionUpdate();
-    });
+    if (stopSessionMeta) stopSessionMeta();
+    // Narrow meta-only subscription: avoids re-downloading the growing
+    // answers/scores trees on every answer (a big source of lag).
+    stopSessionMeta = RehoSprint.watchSessionMeta(
+      db.ref(`events/${eventId}/sessions/${sessionId}`),
+      (meta) => {
+        sessionData = meta;
+        if (!sessionData || !sessionData.status) { showPanel("p-waiting"); return; }
+        handleSessionUpdate();
+      }
+    );
   }
 
   // ----------------------------------------------------------
@@ -88,6 +96,7 @@
       if (cq.id !== lastRenderedQuestionId) {
         lastRenderedQuestionId = cq.id;
         hasAnsweredCurrent = false;
+        autoRevealFired = false;
         renderQuestion(cq);
         checkExistingAnswer(cq);
       }
@@ -166,7 +175,9 @@
     hasAnsweredCurrent = true;
     lockOptions(selectedIndex);
 
-    const answerTimeMs = Date.now() - cq.startedAt;
+    // Compare against the server-consistent clock so a device whose clock
+    // drifts from the host can't gain an unfair speed bonus / answer-time rank.
+    const answerTimeMs = RehoSprint.serverNow() - cq.startedAt;
     const correct = selectedIndex === cq.correctIndex;
     const points = correct ? RehoSprint.calculateScore({
       basePoints: eventData.config.base_points,
@@ -176,7 +187,7 @@
       answerTimeMs
     }) : 0;
 
-    const now = Date.now();
+    const now = RehoSprint.serverNow();
     const updates = {};
     updates[`events/${eventId}/sessions/${activeSessionId}/answers/${cq.id}/${currentUser.uid}`] = {
       selectedIndex, correct, points, answerTimeMs, answeredAt: now
@@ -206,7 +217,33 @@
       el.classList.toggle("urgent", sec <= 5);
     }, () => {
       $("p-timer").textContent = "0";
+      autoReveal(cq.id);
     });
+  }
+
+  // When the clock runs out, push the session to REVEAL so everyone moves on
+  // together instead of staring at 0:00. Uses an atomic transaction so a
+  // device that hits zero slightly late can't clobber a later state: the
+  // session only flips to reveal if it's STILL the same live question.
+  function autoReveal(cqId) {
+    if (autoRevealFired) return;
+    if (!sessionData || !sessionData.currentQuestion) return;
+    if (sessionData.status !== RehoSprint.SESSION_STATUS.LIVE) return;
+    if (sessionData.currentQuestion.id !== cqId) return;
+    autoRevealFired = true;
+    db.ref(`events/${eventId}/sessions/${activeSessionId}`)
+      .transaction((current) => {
+        if (!current) return current;
+        // Only transition if this is still the same live question. If the
+        // host already skipped/advanced/ended, leave the session untouched.
+        if (current.status !== RehoSprint.SESSION_STATUS.LIVE) return current;
+        if (!current.currentQuestion || current.currentQuestion.id !== cqId) return current;
+        return { ...current, status: RehoSprint.SESSION_STATUS.REVEAL };
+      })
+      .catch((err) => {
+        console.error("Auto-reveal failed:", err);
+        autoRevealFired = false;
+      });
   }
 
   // ----------------------------------------------------------

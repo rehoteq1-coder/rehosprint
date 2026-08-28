@@ -306,7 +306,24 @@
         <div class="live-controls">
           <button id="btn-next-question" class="btn-primary">Start / Next Question</button>
           <button id="btn-reveal" class="btn-secondary">Reveal Answer</button>
+          <button id="btn-skip-question" class="btn-skip">⏭️ Skip Question</button>
           <button id="btn-end-session" class="btn-danger">End Session</button>
+        </div>
+      </div>
+
+      <!-- LIVE PARTICIPANTS PANEL -->
+      <div id="participants-panel" class="card hidden">
+        <div class="participants-header">
+          <h2>Participants</h2>
+          <span class="muted-mono" id="participants-count-label">0 joined</span>
+        </div>
+        <div class="participants-toolbar">
+          <button class="filter-btn active" data-participant-filter="all">All</button>
+          <button class="filter-btn" data-participant-filter="answered">Answered</button>
+          <button class="filter-btn" data-participant-filter="awaiting">Not Yet</button>
+        </div>
+        <div id="participants-list" class="participants-list">
+          <p class="muted">Waiting for participants to join...</p>
         </div>
       </div>
 

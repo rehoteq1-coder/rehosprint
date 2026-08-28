@@ -23,6 +23,10 @@
   let aiDraftQuestions = []; // generated-but-not-yet-saved questions
   let stopTimer = null;
   let liveListeners = [];
+  let currentLiveEventId = null; // which event the live session listeners belong to
+  let participantsData = {}; // { participantId: { name, ... } }
+  let participantFilter = "all"; // all | answered | awaiting
+  let answeredUids = {}; // { participantId: true } for the current question
 
   const $ = (id) => document.getElementById(id);
 
@@ -180,6 +184,7 @@
     setupRegistrationLink(eventId);
     watchSchools(eventId);
     watchDraw(eventId);
+    watchParticipants(eventId);
     document.querySelector('.nav-btn[data-view="questions"]').click();
   }
 
@@ -229,6 +234,9 @@
 
   function watchSchools(eventId) {
     db.ref(`events/${eventId}/schools`).on("value", (snap) => {
+      // Ignore updates for an event that's no longer the selected one, so a
+      // stale listener from a previously managed event can't mix data in.
+      if (eventId !== activeEventId) return;
       schoolsData = snap.exists() ? snap.val() : {};
       renderSchoolsSummary();
       renderSchoolsList();
@@ -262,9 +270,11 @@
     }
   }
 
-  document.querySelectorAll(".filter-btn").forEach(btn => {
+  // Scope to the schools toolbar so it doesn't collide with the participants
+  // filter (which also uses .filter-btn but lives in .participants-toolbar).
+  document.querySelectorAll(".schools-filter .filter-btn").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".schools-filter .filter-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       currentFilter = btn.dataset.filter;
       renderSchoolsList();
@@ -388,12 +398,132 @@
   });
 
   // ----------------------------------------------------------
+  // PARTICIPANTS (live roster for the host)
+  // ----------------------------------------------------------
+  function watchParticipants(eventId) {
+    // Detach any listeners from a previously selected event so a stale
+    // event's participant updates can't overwrite the active event's roster.
+    detachParticipantsListener();
+    participantsData = {};
+    answeredUids = {};
+    const ref = db.ref(`events/${eventId}/participants`);
+    const cb = (snap) => {
+      if (eventId !== activeEventId) return;
+      participantsData = snap.exists() ? snap.val() : {};
+      renderParticipantsList();
+    };
+    ref.on("value", cb);
+    participantsListener = { ref, cb };
+    // If a session is active, also watch who answered the current question.
+    if (activeSessionId && sessionData && sessionData.currentQuestion) {
+      watchCurrentAnswers(eventId, sessionData.currentQuestion.id);
+    }
+  }
+  let participantsListener = null;
+
+  function detachParticipantsListener() {
+    if (participantsListener) {
+      participantsListener.ref.off("value", participantsListener.cb);
+      participantsListener = null;
+    }
+  }
+
+  function watchCurrentAnswers(eventId, questionId) {
+    // Detach any previous answers listener for this event before re-attaching.
+    detachAnswersListener();
+    if (!questionId || !activeSessionId) return;
+    const ref = db.ref(`events/${eventId}/sessions/${activeSessionId}/answers/${questionId}`);
+    const cb = (snap) => {
+      answeredUids = snap.exists() ? snap.val() : {};
+      renderParticipantsList();
+    };
+    ref.on("value", cb);
+    answersListener = { ref, cb };
+  }
+  let answersListener = null;
+
+  function detachAnswersListener() {
+    if (answersListener) {
+      answersListener.ref.off("value", answersListener.cb);
+      answersListener = null;
+    }
+  }
+
+  document.querySelectorAll(".participants-toolbar .filter-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".participants-toolbar .filter-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      participantFilter = btn.dataset.participantFilter;
+      renderParticipantsList();
+    });
+  });
+
+  function renderParticipantsList() {
+    const panel = $("participants-panel");
+    if (!panel) return;
+
+    // Only show the roster while a session is live — it shouldn't sit empty
+    // on the Run Session tab before the host hits "Create & Start Session".
+    const sessionLive = $("session-live");
+    const sessionRunning = !!(activeSessionId && sessionLive && !sessionLive.classList.contains("hidden"));
+    if (!sessionRunning) {
+      panel.classList.add("hidden");
+      return;
+    }
+
+    const entries = Object.entries(participantsData);
+    const answeredCount = Object.keys(answeredUids).length;
+
+    $("participants-count-label").textContent = `${entries.length} joined · ${answeredCount} answered`;
+    panel.classList.remove("hidden");
+
+    const listEl = $("participants-list");
+    if (!entries.length) {
+      listEl.innerHTML = `<p class="muted">Waiting for participants to join...</p>`;
+      return;
+    }
+
+    let rows = entries.map(([uid, p]) => ({
+      uid,
+      name: p.name || p.email || "Participant",
+      email: p.email || "",
+      answered: !!answeredUids[uid]
+    }));
+
+    rows.sort((a, b) => {
+      // Answered first, then by name.
+      if (a.answered !== b.answered) return a.answered ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    if (participantFilter === "answered") rows = rows.filter(r => r.answered);
+    if (participantFilter === "awaiting") rows = rows.filter(r => !r.answered);
+
+    if (!rows.length) {
+      listEl.innerHTML = `<p class="muted">No ${participantFilter === "answered" ? "answered" : participantFilter === "awaiting" ? "awaiting" : "matching"} participants.</p>`;
+      return;
+    }
+
+    listEl.innerHTML = rows.map(r => `
+      <div class="participant-row ${r.answered ? "answered" : ""}">
+        <span class="participant-status-dot ${r.answered ? "answered" : "awaiting"}"></span>
+        <div class="participant-row-main">
+          <div class="participant-row-name">${escapeHtml(r.name)}</div>
+          ${r.email ? `<div class="participant-row-meta">${escapeHtml(r.email)}</div>` : ""}
+        </div>
+        <span class="participant-answer-pill">${r.answered ? "Answered" : "Not yet"}</span>
+      </div>
+    `).join("");
+  }
+
+  // ----------------------------------------------------------
   // DRAW
   // ----------------------------------------------------------
   let drawData = null;
 
   function watchDraw(eventId) {
     db.ref(`events/${eventId}/draw`).on("value", (snap) => {
+      if (eventId !== activeEventId) return;
       drawData = snap.exists() ? snap.val() : null;
       renderDrawUI();
     });
@@ -631,14 +761,23 @@
       const q = questionBank[qid];
       const row = document.createElement("div");
       row.className = "list-item";
+      const isDisabled = !!q.disabled;
       row.innerHTML = `
         <div class="list-item-main">
-          <div class="list-item-title">${escapeHtml(q.text)}</div>
+          <div class="list-item-title">${escapeHtml(q.text)}${isDisabled ? ` <span class="status-pill rejected">Disabled</span>` : ""}</div>
           <div class="list-item-sub">Correct: ${escapeHtml(q.options[q.correctIndex] || "")}${q.imageUrl ? " · has image" : ""}</div>
         </div>
-        <button class="btn-small danger">Delete</button>
+        <div class="school-row-actions">
+          <button class="btn-small toggle-btn">${isDisabled ? "Enable" : "Disable"}</button>
+          <button class="btn-small danger">Delete</button>
+        </div>
       `;
-      row.querySelector("button").addEventListener("click", async () => {
+      row.querySelector(".toggle-btn").addEventListener("click", async () => {
+        const next = !questionBank[qid].disabled;
+        await db.ref(`events/${activeEventId}/questions/${qid}/disabled`).set(next);
+        loadQuestions();
+      });
+      row.querySelector(".danger").addEventListener("click", async () => {
         if (!confirm("Delete this question?")) return;
         await db.ref(`events/${activeEventId}/questions/${qid}`).remove();
         loadQuestions();
@@ -816,7 +955,8 @@ Rules:
   // ----------------------------------------------------------
   function renderSessionPicker() {
     const picker = $("session-question-picker");
-    const ids = Object.keys(questionBank);
+    // Exclude disabled (flagged-wrong) questions so they can't be run.
+    const ids = Object.keys(questionBank).filter(qid => !questionBank[qid].disabled);
     if (!ids.length) {
       picker.innerHTML = `<p class="muted">Add questions first.</p>`;
       return;
@@ -833,12 +973,20 @@ Rules:
     $("session-setup").classList.remove("hidden");
     $("session-live").classList.add("hidden");
     $("session-ended").classList.add("hidden");
+    $("participants-panel").classList.add("hidden");
     if (stopTimer) { stopTimer(); stopTimer = null; }
+    detachAnswersListener();
+    lastWatchedQuestionId = null;
+    // Clear any session state carried over from a previously managed event so
+    // a stale session can't drive the roster/answers of the newly selected one.
+    activeSessionId = null;
+    sessionData = null;
     detachLiveListeners();
   }
 
   let activeSessionId = null;
   let sessionData = null;
+  let lastWatchedQuestionId = null;
 
   $("btn-start-session").addEventListener("click", async () => {
     const errorEl = $("session-setup-error");
@@ -860,7 +1008,14 @@ Rules:
 
     $("session-setup").classList.add("hidden");
     $("session-live").classList.remove("hidden");
+    answeredUids = {};
+    participantFilter = "all";
+    document.querySelectorAll(".participants-toolbar .filter-btn").forEach(b => b.classList.remove("active"));
+    const allBtn = document.querySelector('.participants-toolbar .filter-btn[data-participant-filter="all"]');
+    if (allBtn) allBtn.classList.add("active");
+    currentLiveEventId = activeEventId;
     attachLiveListeners();
+    renderParticipantsList();
     updateProgressLabel();
   });
 
@@ -882,7 +1037,9 @@ Rules:
       correctIndex: q.correctIndex,
       imageUrl: q.imageUrl || null,
       timeLimit,
-      startedAt: Date.now()
+      // Server timestamp: resolves to the moment the write lands, so every
+      // screen starts from the same instant regardless of the host's clock.
+      startedAt: firebase.database.ServerValue.TIMESTAMP
     };
 
     await db.ref(`events/${activeEventId}/sessions/${activeSessionId}`).update({
@@ -898,6 +1055,76 @@ Rules:
     });
   });
 
+  // Skip the current live question: void it (remove its answers and roll back
+  // the points participants earned from it), then advance to the next one.
+  // If there's no next question, the session ends.
+  $("btn-skip-question").addEventListener("click", async () => {
+    if (!sessionData || !activeSessionId) return;
+    const cq = sessionData.currentQuestion;
+    if (!cq) { alert("No live question to skip."); return; }
+
+    if (!confirm(`Skip question ${sessionData.currentIndex + 1}? This voids it and removes everyone's points for it.`)) return;
+
+    try {
+      // 1. Collect current answers for this question.
+      const answersSnap = await db.ref(`events/${activeEventId}/sessions/${activeSessionId}/answers/${cq.id}`).get();
+      const answers = answersSnap.exists() ? answersSnap.val() : {};
+
+      // 2. Roll back each participant's score by the points they got here.
+      const rollbacks = [];
+      Object.entries(answers).forEach(([uid, ans]) => {
+        if (!ans || !ans.points) return;
+        const pts = ans.points;
+        rollbacks.push(db.ref(`events/${activeEventId}/sessions/${activeSessionId}/scores/${uid}`)
+          .transaction((current) => {
+            const s = (current && current.score) || 0;
+            const name = (current && current.name) || "Participant";
+            return { ...(current || {}), name, score: Math.max(0, s - pts), lastAnswerTime: (current && current.lastAnswerTime) || RehoSprint.serverNow() };
+          }));
+      });
+      await Promise.all(rollbacks);
+
+      // 3. Remove the voided question's answers.
+      await db.ref(`events/${activeEventId}/sessions/${activeSessionId}/answers/${cq.id}`).remove();
+
+      // 4. Advance to the next question, or end the session.
+      const nextIndex = sessionData.currentIndex + 1;
+      if (nextIndex >= sessionData.questionOrder.length) {
+        await db.ref(`events/${activeEventId}/sessions/${activeSessionId}`).update({
+          status: RehoSprint.SESSION_STATUS.ENDED
+        });
+        const scoresSnap = await db.ref(`events/${activeEventId}/sessions/${activeSessionId}/scores`).get();
+        renderFinalLeaderboard(RehoSprint.buildLeaderboard(scoresSnap.val()));
+        $("session-live").classList.add("hidden");
+        $("session-ended").classList.remove("hidden");
+        $("participants-panel").classList.add("hidden");
+        detachLiveListeners();
+        if (stopTimer) { stopTimer(); stopTimer = null; }
+      } else {
+        const qid = sessionData.questionOrder[nextIndex];
+        const q = questionBank[qid];
+        const timeLimit = q.timeLimit || activeEventData.config.timer_seconds;
+        const currentQuestion = {
+          id: qid,
+          text: q.text,
+          options: q.options,
+          correctIndex: q.correctIndex,
+          imageUrl: q.imageUrl || null,
+          timeLimit,
+          startedAt: firebase.database.ServerValue.TIMESTAMP
+        };
+        await db.ref(`events/${activeEventId}/sessions/${activeSessionId}`).update({
+          currentIndex: nextIndex,
+          currentQuestion,
+          status: RehoSprint.SESSION_STATUS.LIVE
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Couldn't skip the question. Check your connection and try again.");
+    }
+  });
+
   $("btn-end-session").addEventListener("click", async () => {
     if (!confirm("End this session? Final leaderboard will be shown.")) return;
     await db.ref(`events/${activeEventId}/sessions/${activeSessionId}`).update({
@@ -908,6 +1135,7 @@ Rules:
     renderFinalLeaderboard(leaderboard);
     $("session-live").classList.add("hidden");
     $("session-ended").classList.remove("hidden");
+    $("participants-panel").classList.add("hidden");
     detachLiveListeners();
     if (stopTimer) { stopTimer(); stopTimer = null; }
   });
@@ -917,28 +1145,35 @@ Rules:
     sessionData = null;
     $("session-ended").classList.add("hidden");
     $("session-setup").classList.remove("hidden");
+    detachAnswersListener();
+    lastWatchedQuestionId = null;
     renderSessionPicker();
   });
 
   function attachLiveListeners() {
     const sessionRef = db.ref(`events/${activeEventId}/sessions/${activeSessionId}`);
-    const cb = sessionRef.on("value", (snap) => {
+    const cb = (snap) => {
+      if (activeEventId !== currentLiveEventId) return;
       sessionData = snap.val();
       if (!sessionData) return;
       renderLiveState();
-    });
+    };
+    sessionRef.on("value", cb);
     liveListeners.push({ ref: sessionRef, cb });
 
     const participantsRef = db.ref(`events/${activeEventId}/participants`);
-    const pcb = participantsRef.on("value", (snap) => {
+    const pcb = (snap) => {
+      if (activeEventId !== currentLiveEventId) return;
       $("stat-total").textContent = snap.exists() ? Object.keys(snap.val()).length : 0;
-    });
+    };
+    participantsRef.on("value", pcb);
     liveListeners.push({ ref: participantsRef, cb: pcb });
   }
 
   function detachLiveListeners() {
     liveListeners.forEach(({ ref, cb }) => ref.off("value", cb));
     liveListeners = [];
+    currentLiveEventId = null;
   }
 
   function renderLiveState() {
@@ -955,6 +1190,12 @@ Rules:
       $("stat-answered").textContent = "0";
       $("stat-time").textContent = "--";
       return;
+    }
+
+    // Re-watch who answered whenever the live question changes.
+    if (cq.id !== lastWatchedQuestionId) {
+      lastWatchedQuestionId = cq.id;
+      watchCurrentAnswers(activeEventId, cq.id);
     }
 
     $("current-q-text").textContent = cq.text;

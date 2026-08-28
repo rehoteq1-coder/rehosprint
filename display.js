@@ -15,6 +15,8 @@
   let lastQuestionId = null;
   let lastRevealedQuestionId = null;
   let stopTimer = null;
+  let stopSessionMeta = null;
+  let stopAnsweredCount = null;
   let participantsMap = {};
   let schoolsMap = {};
   let drawBlocking = false;
@@ -106,13 +108,17 @@
       let newId = null;
       snap.forEach(child => { newId = child.key; });
       if (newId !== activeSessionId) {
-        if (activeSessionId) db.ref(`events/${eventId}/sessions/${activeSessionId}`).off();
+        if (activeSessionId && stopSessionMeta) stopSessionMeta();
+        if (stopAnsweredCount) { stopAnsweredCount(); stopAnsweredCount = null; }
         activeSessionId = newId;
-        db.ref(`events/${eventId}/sessions/${activeSessionId}`).on("value", (s) => {
-          sessionData = s.val();
-          if (!sessionData) { showPanel("d-waiting"); return; }
-          render();
-        });
+        // Narrow meta-only subscription (avoids re-downloading answers/scores).
+        stopSessionMeta = RehoSprint.watchSessionMeta(
+          db.ref(`events/${eventId}/sessions/${activeSessionId}`),
+          (meta) => {
+            sessionData = meta;
+            render();
+          }
+        );
       }
     });
   }
@@ -145,6 +151,7 @@
 
     if (status === RehoSprint.SESSION_STATUS.REVEAL) {
       if (stopTimer) stopTimer();
+      if (stopAnsweredCount) { stopAnsweredCount(); stopAnsweredCount = null; }
       renderRevealQuestion(cq);
       if (lastRevealedQuestionId !== cq.id) {
         lastRevealedQuestionId = cq.id;
@@ -156,6 +163,7 @@
 
     if (status === RehoSprint.SESSION_STATUS.ENDED) {
       if (stopTimer) stopTimer();
+      if (stopAnsweredCount) { stopAnsweredCount(); stopAnsweredCount = null; }
       renderLadder();
       showPanel("d-ended");
     }
@@ -217,13 +225,21 @@
   }
 
   function watchAnsweredCount(cq) {
-    db.ref(`events/${eventId}/sessions/${activeSessionId}/answers/${cq.id}`).on("value", (snap) => {
+    // Detach any previous answered-count listener before re-attaching so the
+    // app doesn't stack listeners (each render currently re-invoked this).
+    if (stopAnsweredCount) { stopAnsweredCount(); stopAnsweredCount = null; }
+    // Attach to the exact question/session path captured now, so stale
+    // listeners can't update the bar for a past question after a session switch.
+    const ref = db.ref(`events/${eventId}/sessions/${activeSessionId}/answers/${cq.id}`);
+    const cb = (snap) => {
       const answered = snap.exists() ? Object.keys(snap.val()).length : 0;
       const total = Math.max(1, parseInt($("d-joined-num").textContent, 10) || 1);
       $("d-answered-num").textContent = answered;
       $("d-total-num").textContent = $("d-joined-num").textContent;
       $("d-answered-fill").style.width = `${Math.min(100, (answered / total) * 100)}%`;
-    });
+    };
+    ref.on("value", cb);
+    stopAnsweredCount = () => ref.off("value", cb);
   }
 
   function startTimer(cq) {
@@ -232,7 +248,30 @@
       const el = $("d-timer");
       el.textContent = RehoSprint.formatTime(sec);
       el.classList.toggle("urgent", sec <= 5);
-    }, () => {});
+    }, () => {
+      // Auto-advance to reveal when the countdown ends, so nobody is left
+      // staring at 0:00 waiting for the host to press Reveal. Uses an atomic
+      // transaction so it can't clobber a later state (skipped/ended question).
+      autoReveal(cq.id);
+    });
+  }
+
+  // Fires once when the question timer reaches zero. Writes the session
+  // status to REVEAL so all screens move on together. The transaction guard
+  // keeps a device that hits zero slightly late from overwriting a later
+  // state (e.g. if the host already ended the session or skipped the question).
+  function autoReveal(cqId) {
+    if (!sessionData || !sessionData.currentQuestion) return;
+    if (sessionData.status !== RehoSprint.SESSION_STATUS.LIVE) return;
+    if (sessionData.currentQuestion.id !== cqId) return;
+    db.ref(`events/${eventId}/sessions/${activeSessionId}`)
+      .transaction((current) => {
+        if (!current) return current;
+        if (current.status !== RehoSprint.SESSION_STATUS.LIVE) return current;
+        if (!current.currentQuestion || current.currentQuestion.id !== cqId) return current;
+        return { ...current, status: RehoSprint.SESSION_STATUS.REVEAL };
+      })
+      .catch((err) => console.error("Auto-reveal failed:", err));
   }
 
   async function renderLadder() {
