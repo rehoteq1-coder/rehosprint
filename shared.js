@@ -6,6 +6,30 @@
 const RehoSprint = (() => {
 
   // ----------------------------------------------------------
+  // SERVER-TIME CLOCK (cross-device timer + scoring sync)
+  // ----------------------------------------------------------
+  // Firebase Realtime Database exposes the offset (in ms) between this
+  // device's clock and the Firebase server clock at .info/serverTimeOffset.
+  // Adding that offset to Date.now() yields the canonical server time, so
+  // the countdown and answer timing stay identical across every screen even
+  // when devices have skewed clocks (the cause of "my timer is behind /
+  // ahead of everyone else"). Without this, a participant whose clock
+  // drifts from the host's laptop gets a shifted countdown.
+  let serverTimeOffset = 0;
+
+  function initServerClock() {
+    if (typeof db === "undefined" || !db.ref) return;
+    db.ref(".info/serverTimeOffset").on("value", (snap) => {
+      serverTimeOffset = typeof snap.val() === "number" ? snap.val() : 0;
+    });
+  }
+  initServerClock();
+
+  function serverNow() {
+    return Date.now() + serverTimeOffset;
+  }
+
+  // ----------------------------------------------------------
   // SCORING
   // ----------------------------------------------------------
   /**
@@ -44,7 +68,7 @@ const RehoSprint = (() => {
   function startCountdown(startedAt, durationSeconds, onTick, onEnd) {
     let ended = false;
     const intervalId = setInterval(() => {
-      const elapsedMs = Date.now() - startedAt;
+      const elapsedMs = serverNow() - startedAt;
       const remainingMs = (durationSeconds * 1000) - elapsedMs;
       const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
       onTick(remainingSec);
@@ -55,6 +79,44 @@ const RehoSprint = (() => {
       }
     }, 250);
     return () => clearInterval(intervalId);
+  }
+
+  // ----------------------------------------------------------
+  // NARROW SESSION WATCH (performance)
+  // ----------------------------------------------------------
+  // Historically display.js / participant.js subscribed to the entire
+  // session node with .on("value"), which also carries the growing
+  // `answers` and `scores` subtrees. Every time a participant answered,
+  // every open screen re-downloaded the WHOLE session and re-rendered —
+  // the main cause of lag as the room filled up. This helper subscribes
+  // only to the small meta fields a live screen actually needs, so the
+  // heavy answer/score trees are never pulled during playback. Screens
+  // that need answers still read them with their own narrow listeners.
+  const SESSION_META_KEYS = ["status", "currentIndex", "currentQuestion", "questionOrder", "bonusEnabled", "createdAt"];
+
+  /**
+   * Listen to just the meta children of a session node and assemble a
+   * lightweight sessionData object. Answers/scores are intentionally omitted.
+   * @param {object} sessionRef - a Firebase reference to the session node
+   * @param {function} onChange - callback(sessionMetaObject)
+   * @returns {function} stop - detach all child listeners
+   */
+  function watchSessionMeta(sessionRef, onChange) {
+    const listeners = [];
+    const data = {};
+    const fire = () => {
+      if (Object.keys(data).length > 0) onChange({ ...data });
+    };
+    SESSION_META_KEYS.forEach((key) => {
+      const ref = sessionRef.child(key);
+      const cb = (snap) => {
+        data[key] = snap.val();
+        fire();
+      };
+      ref.on("value", cb);
+      listeners.push({ ref, cb });
+    });
+    return () => listeners.forEach(({ ref, cb }) => ref.off("value", cb));
   }
 
   // ----------------------------------------------------------
@@ -143,7 +205,9 @@ const RehoSprint = (() => {
 
   return {
     calculateScore,
+    serverNow,
     startCountdown,
+    watchSessionMeta,
     buildLeaderboard,
     JOIN_MODES,
     joinModeLabel,
